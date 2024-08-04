@@ -15,6 +15,9 @@ left_to_right = list(zip(x_values, y_values))
 
 radius = 7.275
 
+counter = 0
+flag = 'y'
+
 def init_node():
 
     global cmd_pub, steering_pub, brake_pub
@@ -36,9 +39,13 @@ look_ahead2 = 2
 wheel_base_real= 1.18
 wheel_base = 2.26963
 
+def stop():
+    cmd_pub.publish(0)
+    steering_pub.publish(0)
+
 
 def callvack(odom):
-    global C_pose, yaw
+    global C_pose, yaw, flag, counter
 
     C_pose = [0.0,0.0]
     C_pose[0] = odom.pose.pose.position.x
@@ -47,6 +54,19 @@ def callvack(odom):
     z_orien = odom.pose.pose.orientation.z
     orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
     (_, _, yaw) = euler_from_quaternion(orientation_list)
+
+
+    if int(C_pose[1]) == 0 and flag == 'y':
+        if counter !=6:
+            counter+=1 
+            rospy.loginfo(counter)
+            flag='n'
+        else:
+            stop()
+
+    if int(C_pose[1]) != 0:
+        flag = 'y'
+
 
     if C_pose[1] >= -2.375 and C_pose[1] <= 2.375 and yaw <=0:
         rospy.loginfo("left to right")
