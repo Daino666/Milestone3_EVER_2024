@@ -2,7 +2,7 @@
 
 import rospy
 import numpy as np
-from std_msgs.msg import Float32, Float64
+from std_msgs.msg import Float32, Float64, String
 from nav_msgs.msg import Odometry
 from tf.transformations import euler_from_quaternion
 
@@ -25,6 +25,9 @@ def init_node():
     rospy.init_node("pure_pursuit_control", anonymous=False)
 
     rospy.Subscriber('/aft_mapped_adjusted', Odometry, callvack)
+    rospy.Subscriber('/depth', Float32, manage_depth)
+    rospy.Subscriber('/color', String, manage_color)
+
 
     cmd_pub = rospy.Publisher("/in_Car_velocity_in_KM/H", Float32, queue_size=10) 
 
@@ -43,6 +46,14 @@ def stop():
     cmd_pub.publish(0)
     steering_pub.publish(0)
 
+def manage_depth(msg):
+    global depth
+    depth = msg.data
+    #rospy.loginfo(depth)
+    
+def manage_color(msg):
+    global color
+    color = msg.data
 
 def callvack(odom):
     global C_pose, yaw, flag, counter
@@ -139,9 +150,45 @@ def calculate_curv(point):
     steering_angle_deg = np.degrees(steering_angle)
     steering_angle_deg = np.clip(steering_angle_deg, -max_steering_angle, max_steering_angle)
     
-    # Apply a small deadband to reduce jitter
-    if abs(steering_angle_deg) < 3:
+    # Apply a small deadband to reduce osscilations
+    if abs(steering_angle_deg) < 1:
         steering_angle_deg = 0
+
+
+    while (depth <= 2000 and depth > 0):   #tuning
+        if color == 'yellow':
+            steering_angle_deg -= 5     #tuning
+
+            steering_angle_deg *=-1
+            rospy.loginfo(steering_angle_deg)
+            steering_pub.publish(steering_angle_deg)
+            velocity = Float32()
+            velocity.data= 1
+            cmd_pub.publish(velocity)
+
+
+        elif color == 'blue':
+            steering_angle_deg += 5     #tuning
+
+            steering_angle_deg *=-1
+            rospy.loginfo(steering_angle_deg)
+            steering_pub.publish(steering_angle_deg)
+            velocity = Float32()
+            velocity.data= 1
+            cmd_pub.publish(velocity)
+        else:
+            steering_angle_deg *=-1
+            rospy.loginfo(steering_angle_deg)
+            steering_pub.publish(steering_angle_deg)
+            velocity = Float32()
+            int_steering = int(steering_angle_deg)
+            velocity.data= 5 * ( 1 - (int_steering/25) )
+            cmd_pub.publish(velocity)
+
+
+
+
+
     steering_angle_deg *=-1
     rospy.loginfo(steering_angle_deg)
     steering_pub.publish(steering_angle_deg)
@@ -154,9 +201,6 @@ def calculate_curv(point):
 
 if __name__ == '__main__':
     try:
-
-
-
         init_node()
         rospy.spin()
 
