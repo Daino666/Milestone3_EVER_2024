@@ -1,23 +1,54 @@
 #!/usr/bin/env python
 
+import csv 
 import rospy
 import numpy as np
 from std_msgs.msg import Float32, Float64
 from nav_msgs.msg import Odometry
 from tf.transformations import euler_from_quaternion
 
-y_values = np.linspace(-2.375, 2.375, 30)
-x_values = np.linspace(-3.832, 3.832, 30)
-right_to_left = list(zip(x_values, y_values))
+#y_values = np.linspace(-2.375, 2.375, 30)
+#x_values = np.linspace(-3.832, 3.832, 30)
+#right_to_left = list(zip(x_values, y_values))
 
-y_values = np.linspace(2.375, -2.375, 30)
-left_to_right = list(zip(x_values, y_values))
+#y_values = np.linspace(2.375, -2.375, 30)
+#left_to_right = list(zip(x_values, y_values))
 
 radius = 7.275
 
+look_ahead1 = 1
+look_ahead2 = 2
+wheel_base_real= 1.18
+wheel_base = 2.26963
+counter = 0
+flag = "y"
+
+
+
+def csv_reading(file_path, column_name):
+    column_data = []
+    with open(file_path, mode='r') as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            if column_name in row:
+                column_data.append(float(row[column_name]))
+    return column_data
+
+
+
+file_path = '/home/daino/workspace/src/real_time/scripts/bag_odom.csv'
+column_x = 'positions_x_odom'
+column_y = 'positions_y_odom'
+x_values = csv_reading(file_path, column_x)  
+y_values = csv_reading(file_path, column_y)   
+
+num_path_values  = len(x_values)
+
+path = list(zip(x_values, y_values))
+
 def init_node():
 
-    global cmd_pub, steering_pub, brake_pub
+    global cmd_pub, steering_pub, brake_pub, brake_pub
 
     rospy.init_node("pure_pursuit_control", anonymous=False)
 
@@ -25,20 +56,32 @@ def init_node():
 
     cmd_pub = rospy.Publisher("/cmd_vel", Float64, queue_size=100) 
 
+    brake_pub = rospy.Publisher("/brakes", Float64, queue_size= 10)
+
     steering_pub = rospy.Publisher("/SteeringAngle", Float64, queue_size=10)
 
     rate = rospy.Rate(10)
     rate.sleep()
 
 
-look_ahead1 = 1
-look_ahead2 = 2
-wheel_base_real= 1.18
-wheel_base = 2.26963
+
+
+def stop():
+    while True:
+        cmd_pub.publish(0)
+        steering_pub.publish(0)
+        brake_pub.publish(1)
+
+def normalize_angle(angle):
+    while angle > np.pi:
+        angle -= 2 * np.pi
+    while angle < -np.pi:
+        angle += 2 * np.pi
+    return angle
 
 
 def callvack(odom):
-    global C_pose, yaw
+    global C_pose, yaw, counter, flag, path, num_path_values
 
     C_pose = [0.0,0.0]
     C_pose[0] = odom.pose.pose.position.x
@@ -48,8 +91,37 @@ def callvack(odom):
     orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
     (_, _, yaw) = euler_from_quaternion(orientation_list)
 
+    if int(C_pose[1]) == 0 and flag == 'y':
+        if counter !=6:
+            counter+=1 
+            rospy.loginfo(counter)
+            flag='n'
+        else:
+            stop()
+
+    if int(C_pose[1]) != 0:
+        flag = 'y'
+
+    for i in range (0, num_path_values):
+        dx = path[i][0] - C_pose[0]
+        dy = path[i][1] - C_pose[1]
+        distance = np.sqrt(dx**2 + dy**2)
+        waypoint_angle = np.arctan2(dy, dx)
+        angle_diff = abs(normalize_angle(waypoint_angle - yaw))
+        angle_diff *= 180/np.pi
+
+        if distance>= 1.5 and distance <= 2.5 and angle_diff >=0 and  angle_diff <=30:
+            point =  path[i]
+            calculate_curv(point)
+            return
+
+
+
+
+
+''''
     if C_pose[1] >= -2.375 and C_pose[1] <= 2.375 and yaw <=0:
-        rospy.loginfo("left to right")
+        #rospy.loginfo("left to right")
         waypoints = left_to_right
         for point in waypoints:
             if point[1] < (C_pose[1] - look_ahead1) and point[1] >= (C_pose[1] - look_ahead1-2):
@@ -57,17 +129,18 @@ def callvack(odom):
                 return
 
     if C_pose[1]>= -2.375 and C_pose[1]<= 2.375 and yaw > 0:
-        rospy.loginfo("right to left")
+        #rospy.loginfo("right to left")
 
         waypoints = right_to_left
         for point in waypoints:
+
             if point[1] > (C_pose[1] + look_ahead1) and point[1] <= (C_pose[1] + look_ahead1+2):
                 calculate_curv(point)
                 return
     
 
     if C_pose[1] > 2.375 :
-        rospy.loginfo("left circle")
+        #rospy.loginfo("left circle")
 
         cy = 8.56
         cx = 0
@@ -77,7 +150,7 @@ def callvack(odom):
         calculate_curv(lookAhead_point)
     
     if C_pose[1] < -2.375 :
-        rospy.loginfo("right circle")
+        #rospy.loginfo("right circle")
 
         cy = - 8.56
         cx = 0
@@ -86,6 +159,20 @@ def callvack(odom):
         lookAhead_point = (cx+(radius * np.cos(lookAhead_angle)), (radius * np.sin(lookAhead_angle))+cy)
 
         calculate_curv(lookAhead_point)
+        '''
+    
+    
+    
+
+
+
+
+
+
+
+
+
+
 
 
 def calculate_curv(point):
@@ -123,7 +210,7 @@ def calculate_curv(point):
     if abs(steering_angle_deg) < 3:
         steering_angle_deg = 0
 
-    rospy.loginfo(steering_angle_deg)
+    #rospy.loginfo(steering_angle_deg)
     steering_pub.publish(steering_angle_deg)
     velocity = Float64()
     velocity.data= .1
