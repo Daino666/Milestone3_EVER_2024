@@ -1,22 +1,43 @@
 #!/usr/bin/env python
-
+import csv
 import rospy
 import numpy as np
 from std_msgs.msg import Float32, Float64, String
 from nav_msgs.msg import Odometry
 from tf.transformations import euler_from_quaternion
-
+'''
 y_values = np.linspace(-2.375, 2.375, 15)
 x_values = np.linspace(-3.832, 3.832, 15)
 right_to_left = list(zip(x_values, y_values))
 
 y_values = np.linspace(2.375, -2.375, 15)
 left_to_right = list(zip(x_values, y_values))
-
+'''
 radius = 7.275
 
 counter = 0
 flag = 'y'
+
+def csv_reading(file_path, column_name):
+    column_data = []
+    with open(file_path, mode='r') as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            if column_name in row:
+                column_data.append(float(row[column_name]))
+    return column_data
+
+
+file_path = '/home/daino/workspace/src/real_time/scripts/bag_odom.csv'
+column_x = 'positions_x_odom'
+column_y = 'positions_y_odom'
+
+x_values = csv_reading(file_path, column_x)  
+y_values = csv_reading(file_path, column_y)   
+num_path_values  = len(x_values)
+
+path = list(zip(x_values, y_values))
+
 
 def init_node():
 
@@ -46,6 +67,14 @@ def stop():
     cmd_pub.publish(0)
     steering_pub.publish(0)
 
+def normalize_angle(angle):
+    while angle > np.pi:
+        angle -= 2 * np.pi
+    while angle < -np.pi:
+        angle += 2 * np.pi
+    return angle
+
+
 def manage_depth(msg):
     global depth
     depth = msg.data
@@ -56,7 +85,7 @@ def manage_color(msg):
     color = msg.data
 
 def callvack(odom):
-    global C_pose, yaw, flag, counter
+    global C_pose, yaw, flag, counter, num_path_values, path
 
     C_pose = [0.0,0.0]
     C_pose[0] = odom.pose.pose.position.x
@@ -78,6 +107,22 @@ def callvack(odom):
     if int(C_pose[1]) != 0:
         flag = 'y'
 
+
+    for i in range (0, num_path_values):
+        dx = path[i][0] - C_pose[0]
+        dy = path[i][1] - C_pose[1]
+        distance = np.sqrt(dx**2 + dy**2)
+        waypoint_angle = np.arctan2(dy, dx)
+        angle_diff = abs(normalize_angle(waypoint_angle - yaw))
+        angle_diff *= 180/np.pi
+
+        if distance>= 1.5 and distance <= 2.5 and angle_diff >=0 and  angle_diff <=30:
+            point =  path[i]
+            calculate_curv(point)
+            return
+
+
+'''
 
     if C_pose[1] >= -2.375 and C_pose[1] <= 2.375 and yaw <=0:
         rospy.loginfo("left to right")
@@ -117,6 +162,7 @@ def callvack(odom):
         lookAhead_point = (cx+(radius * np.cos(lookAhead_angle)), (radius * np.sin(lookAhead_angle))+cy)
 
         calculate_curv(lookAhead_point)
+        '''
 
 
 def calculate_curv(point):
